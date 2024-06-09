@@ -132,9 +132,9 @@ class CLIPVisionModel():
             except Exception as error:
                 logging.error(f"Exception occurred trying to use TensorRT for {self.model_type} model ({self.config.name})\n\n{traceback.format_exc()}")
 
-    def init_trt(self, trt_cache="/data/models/clip"): 
+    def init_trt(self, trt_cache="~/.cache/clip_trt"): 
         if psutil.virtual_memory().total < 20 * (1024 ** 3):
-            logging.warning(f"disabling CLIP TensorRT due to limited memory (falling back to --vision-api=hf)")
+            logging.warning(f"disabling CLIP TensorRT due to limited memory (falling back to Transformers API)")
             return
          
         trt_path = os.path.join(trt_cache, self.config.name.replace('/','-').replace('@','-') + '-trt.pt')

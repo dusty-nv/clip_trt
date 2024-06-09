@@ -11,7 +11,7 @@ ImageTypes = (PIL.Image.Image, np.ndarray, torch.Tensor)
 ImageExtensions = ('.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif')
 
 try:
-from jetson_utils import cudaImage, cudaFromNumpy
+    from jetson_utils import cudaImage, cudaFromNumpy
 except:
     _HAS_JETSON_UTILS=False
 else:
