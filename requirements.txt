@@ -1,7 +1,7 @@
 # you should also install torch2trt
 torch
 torchvision
-transformers
+transformers>=4.37.0
 numpy
 pillow
 psutil

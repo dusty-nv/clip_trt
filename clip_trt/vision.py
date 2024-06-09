@@ -14,7 +14,7 @@ import tensorrt
 import numpy as np
 import torchvision.transforms as T
 
-from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection, SiglipImageProcessor, SiglipVisionModel
+from transformers import CLIPVisionModel, CLIPVisionModelWithProjection, SiglipImageProcessor, SiglipVisionModel
 from .utils import AttributeDict, load_image, torch_image, image_size, convert_tensor, trt_model_filename, print_table
 
 _clip_vision_cache = {}
@@ -24,8 +24,8 @@ class CLIPVisionModel():
     CLIP/SigLIP vision encoder for generating image embeddings with TensorRT.
     """
     @staticmethod
-    def from_pretrained(model="openai/clip-vit-large-patch14-336", dtype=torch.float16, crop=False, 
-                        use_cache=True, use_tensorrt=True, **kwargs):
+    def from_pretrained(model="openai/clip-vit-large-patch14-336", dtype=torch.float16, 
+                        projector=None, crop=None, use_cache=True, use_tensorrt=True, **kwargs):
         """
         Load a CLIP or SigLIP vision encoder model from HuggingFace Hub or a local checkpoint.
         Will use TensorRT for inference if ``use_tensorrt=True``, otherwise falls back to Transformers.
@@ -42,19 +42,41 @@ class CLIPVisionModel():
             
         return instance
     
-    def __init__(self, model, dtype=torch.float16, crop=False, use_tensorrt=True, **kwargs):
+    def __init__(self, model, dtype=torch.float16, projector=None, crop=None, use_tensorrt=True, **kwargs):
+        model_type = clip_model_type(model)
+        
+        if model_type is None:
+            raise ValueError(f"tried loading unrecognized CLIP model from {model} - supported model types are CLIP and SigLIP")
+        
+        if projector is None:
+            projector = (model_type == 'clip')
+            
+        if crop is None:
+            crop = (model_type == 'clip')
+        elif isinstance(crop, str):
+            crop = (crop == 'crop')
+                
+        if model_type == 'siglip':
+            if projector:
+                projector = False
+                logging.warning("disabling projector for SigLIP model {model}")
+            if crop:
+                logging.warning("SigLIP models don't typically have cropping enabled")
+                
         self.stats = AttributeDict()
-        self.config = AttributeDict(name=model, crop=crop)
+        self.config = AttributeDict(name=model, projector=projector, crop=crop)
         
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         self.stream = None
         
         self.dtype = torch.float32 if use_tensorrt else dtype # TRT handles FP16 internally
         self.output_dtype = dtype  # still output the embeddings with the requested dtype
+
+        self.projector = projector
         
         self.model_types = {
-            'clip':  dict(preprocessor=CLIPImageProcessor, model=CLIPVisionModelWithProjection, mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711)),
-            'siglip': dict(preprocessor=SiglipImageProcessor, model=SiglipVisionModel, mean=(0.5,0.5,0.5), std=(0.5,0.5,0.5)),
+            'clip':  dict(model=CLIPVisionModelWithProjection if projector else CLIPVisionModel, mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711)),
+            'siglip': dict(model=SiglipVisionModel, mean=(0.5,0.5,0.5), std=(0.5,0.5,0.5)),
         }
         
         def check_model_type(model_name):
@@ -120,12 +142,11 @@ class CLIPVisionModel():
         self.model = VisionEncoder(self.model)
         self.model.to(dtype=self.dtype, device=self.device).eval()
         
-        print(type(self.model), model, self.model)
-
+        logging.debug(type(self.model), model, self.model)
         logging.debug(f'{self.config.name} warmup')
-        self(PIL.Image.new('RGB', self.config.input_shape, (255,255,255)))
-        print_table(self.config)
         
+        self(PIL.Image.new('RGB', self.config.input_shape, (255,255,255)))
+
         if use_tensorrt:
             try:
                 self.init_trt(**kwargs)
@@ -133,11 +154,16 @@ class CLIPVisionModel():
                 logging.error(f"Exception occurred trying to use TensorRT for {self.model_type} model ({self.config.name})\n\n{traceback.format_exc()}")
 
     def init_trt(self, trt_cache="~/.cache/clip_trt"): 
+        if Version(tensorrt.__version__) >= Version('8.6'):
+            logging.warning(f"disabling CLIP with TensorRT {tensorrt.__version__} (requires TensorRT 8.6 or newer)")
+            return
+            
         if psutil.virtual_memory().total < 20 * (1024 ** 3):
-            logging.warning(f"disabling CLIP TensorRT due to limited memory (falling back to Transformers API)")
+            logging.warning(f"disabling CLIP with TensorRT due to limited memory (falling back to Transformers API)")
             return
 
-        trt_path = os.path.join(trt_cache, trt_model_filename(self.config.name, suffix='vision'))
+        suffix = f"vision{'_projector' if self.projector else ''}"
+        trt_path = os.path.join(trt_cache, trt_model_filename(self.config.name, suffix=suffix))
         test_model_inputs = torch.ones(1, 3, *self.config.input_shape, dtype=self.dtype, device='cuda')
 
         if os.path.isfile(trt_path):
@@ -175,7 +201,7 @@ class CLIPVisionModel():
         trt_model.config = self.model.config
         self.model = trt_model
         
-    def embed_image(self, image, hidden_state=None, return_tensors='pt', return_dict=False, stream=None, **kwargs):
+    def embed(self, image, hidden_state=None, return_tensors='pt', return_dict=False, stream=None, **kwargs):
         """
         Return the encoded features from the given image in the embedding (or whatever the model output is).
         """
@@ -235,5 +261,5 @@ class CLIPVisionModel():
         return output
         
     def __call__(self, image, hidden_state=None, return_tensors='pt', **kwargs):
-        return self.embed_image(image, hidden_state=hidden_state, return_tensors='pt', **kwargs)
+        return self.embed(image, hidden_state=hidden_state, return_tensors='pt', **kwargs)
         
