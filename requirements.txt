@@ -1,0 +1,9 @@
+# you should also install torch2trt
+torch
+torchvision
+transformers
+numpy
+pillow
+psutil
+tabulate
+termcolor
