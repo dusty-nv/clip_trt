@@ -15,7 +15,7 @@ import numpy as np
 import torchvision.transforms as T
 
 from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection, SiglipImageProcessor, SiglipVisionModel
-from .utils import AttributeDict, load_image, torch_image, image_size, convert_tensor, print_table
+from .utils import AttributeDict, load_image, torch_image, image_size, convert_tensor, trt_model_filename, print_table
 
 _clip_vision_cache = {}
 
@@ -136,8 +136,8 @@ class CLIPVisionModel():
         if psutil.virtual_memory().total < 20 * (1024 ** 3):
             logging.warning(f"disabling CLIP TensorRT due to limited memory (falling back to Transformers API)")
             return
-         
-        trt_path = os.path.join(trt_cache, self.config.name.replace('/','-').replace('@','-') + '-trt.pt')
+
+        trt_path = os.path.join(trt_cache, trt_model_filename(self.config.name, suffix='vision'))
         test_model_inputs = torch.ones(1, 3, *self.config.input_shape, dtype=self.dtype, device='cuda')
 
         if os.path.isfile(trt_path):

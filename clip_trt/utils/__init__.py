@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from .image import *
+from .log import *
 from .model import *
 from .table import *
 from .tensor import *
