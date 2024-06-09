@@ -8,3 +8,4 @@ psutil
 tqdm
 tabulate
 termcolor
+packaging

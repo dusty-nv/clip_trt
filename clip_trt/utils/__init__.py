@@ -2,6 +2,7 @@
 from .image import *
 from .log import *
 from .model import *
+from .prompts import *
 from .table import *
 from .tensor import *
 

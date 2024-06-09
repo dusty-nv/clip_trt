@@ -124,3 +124,16 @@ def convert_tensor(tensor, return_tensors='pt', device=None, dtype=None, **kwarg
             return torch.as_tensor(tensor, dtype=dtype, device=device)
                     
     raise ValueError(f"unsupported tensor input/output type (in={type(tensor)} out={return_tensors})")
+    
+def is_embedding(tensor):
+    """
+    Determine if a tensor is likely to be an embedding (torch.Tensor or np.ndarray with dtype=float32)
+    """
+    if isinstance(tensor, torch.Tensor) and torch.is_floating_point(tensor.dtype):
+        return True
+    elif isinstance(tensor, np.ndarray) and (tensor.dtype == np.float16 or tensor.dtype == np.float32 or tensor.dtype == np.float64):
+        return True
+    else:
+        return False
+        
+    

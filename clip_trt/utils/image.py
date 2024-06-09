@@ -13,9 +13,9 @@ ImageExtensions = ('.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif')
 try:
     from jetson_utils import cudaImage, cudaFromNumpy
 except:
-    _HAS_JETSON_UTILS=False
+    HAS_JETSON_UTILS=False
 else:
-    _HAS_JETSON_UTILS=True   
+    HAS_JETSON_UTILS=True   
     ImageTypes = (*ImageTypes, cudaImage)
 
 
@@ -30,7 +30,9 @@ def image_size(image):
     """
     Returns the dimensions of the image as a ``(height, width, channels)`` tuple.
     """
-    if isinstance(image, (cudaImage, np.ndarray, torch.Tensor)):
+    if HAS_JETSON_UTILS and isinstance(image, cudaImage):
+        return image.shape
+    if isinstance(image, (np.ndarray, torch.Tensor)):
         return image.shape
     elif isinstance(image, PIL.Image.Image):
         return image.size
@@ -64,6 +66,9 @@ def cuda_image(image):
     Convert an image from `PIL.Image`, `np.ndarray`, `torch.Tensor`, or `__gpu_array_interface__`
     to a jetson_utils.cudaImage on the GPU (without using memory copies when possible)
     """   
+    if not HAS_JETSON_UTILS:
+        raise RuntimeError(f"jetson-utils should be installed to use cudaImage")
+        
     # TODO implement __gpu_array_interface__
     # TODO torch image formats https://github.com/dusty-nv/jetson-utils/blob/f0bff5c502f9ac6b10aa2912f1324797df94bc2d/python/examples/cuda-from-pytorch.py#L47
     if not is_image(image):
@@ -96,7 +101,7 @@ def torch_image(image, dtype=None, device=None):
     if not isinstance(image, ImageTypes):
         raise TypeError(f"expected an image of type {ImageTypes} (was {type(image)})")
         
-    if isinstance(image, cudaImage):
+    if HAS_JETSON_UTILS and isinstance(image, cudaImage):
         image = torch.as_tensor(image, dtype=dtype, device=device).permute(2,0,1)
         if dtype == torch.float16 or dtype == torch.float32:
             image = image / 255.0

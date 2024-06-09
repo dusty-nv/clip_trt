@@ -11,13 +11,15 @@ import torch
 import torch2trt
 import tensorrt
 
-import numpy as np
 import torchvision.transforms as T
 
-from transformers import CLIPVisionModel, CLIPVisionModelWithProjection, SiglipImageProcessor, SiglipVisionModel
-from .utils import AttributeDict, load_image, torch_image, image_size, convert_tensor, trt_model_filename, print_table
+from packaging.version import Version
+from transformers import CLIPVisionModel as CLIPVisionModelHF, CLIPVisionModelWithProjection, SiglipVisionModel
+from .utils import AttributeDict, load_image, torch_image, image_size, convert_tensor, clip_model_type, trt_model_filename
 
-_clip_vision_cache = {}
+
+_clip_vision_models = {}
+
 
 class CLIPVisionModel():
     """
@@ -30,20 +32,27 @@ class CLIPVisionModel():
         Load a CLIP or SigLIP vision encoder model from HuggingFace Hub or a local checkpoint.
         Will use TensorRT for inference if ``use_tensorrt=True``, otherwise falls back to Transformers.
         """                
-        global _clip_model_cache
+        global _clip_vision_models
         
-        if use_cache and model in _clip_vision_cache:
-            return _clip_vision_cache[model]
+        if use_cache and model in _clip_vision_models:
+            return _clip_vision_models[model]
             
-        instance = CLIPVisionModel(model, dtype=dtype, crop=crop, use_tensorrt=use_tensorrt, **kwargs)
+        instance = CLIPVisionModel(model, dtype=dtype, projector=projector, crop=crop, use_tensorrt=use_tensorrt, **kwargs)
         
         if use_cache:
-            _clip_vision_cache[model] = instance
+            _clip_vision_models[model] = instance
             
         return instance
     
     def __init__(self, model, dtype=torch.float16, projector=None, crop=None, use_tensorrt=True, **kwargs):
-        model_type = clip_model_type(model)
+        clip_class = CLIPVisionModelWithProjection if projector or projector is None else CLIPVisionModelHF
+        
+        model_types = {
+            'clip':  dict(model=clip_class, mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711)),
+            'siglip': dict(model=SiglipVisionModel, mean=(0.5,0.5,0.5), std=(0.5,0.5,0.5)),
+        }
+        
+        model_type = clip_model_type(model, types=model_types.keys())
         
         if model_type is None:
             raise ValueError(f"tried loading unrecognized CLIP model from {model} - supported model types are CLIP and SigLIP")
@@ -63,8 +72,8 @@ class CLIPVisionModel():
             if crop:
                 logging.warning("SigLIP models don't typically have cropping enabled")
                 
+        self.config = AttributeDict(name=model, type=model_type, projector=projector, crop=crop)
         self.stats = AttributeDict()
-        self.config = AttributeDict(name=model, projector=projector, crop=crop)
         
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         self.stream = None
@@ -72,36 +81,9 @@ class CLIPVisionModel():
         self.dtype = torch.float32 if use_tensorrt else dtype # TRT handles FP16 internally
         self.output_dtype = dtype  # still output the embeddings with the requested dtype
 
-        self.projector = projector
-        
-        self.model_types = {
-            'clip':  dict(model=CLIPVisionModelWithProjection if projector else CLIPVisionModel, mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711)),
-            'siglip': dict(model=SiglipVisionModel, mean=(0.5,0.5,0.5), std=(0.5,0.5,0.5)),
-        }
-        
-        def check_model_type(model_name):
-            for key in self.model_types.keys():
-                if key in model_name.lower():
-                    return key 
-            return None
-            
-        self.model_type = check_model_type(model)  # for model names, or paths containing the name
-       
-        if not self.model_type and os.path.isdir(model):  # for paths without, check the config.json
-            try:
-                config_path = os.path.join(model, 'config.json')
-                with open(config_path) as config_file:
-                    model_type = json.load(config_file)['model_type']
-                    self.model_type = check_model_type(model_type)
-            except Exception as error:
-                logging.error(f"failed to get vision encoder type from local model config under {model} ({error})")
- 
-        if not self.model_type:
-            raise ValueError(f"tried loading unrecognized vision encoder from {model} - supported model types are CLIP and SigLIP")
-            
-        logging.info(f'loading {self.model_type} vision model {model}')
+        logging.info(f'loading {model_type} vision model {model}')
 
-        factory = self.model_types[self.model_type]
+        factory = model_types[model_type]
         
         self.model = factory['model'].from_pretrained(model, torch_dtype=self.dtype)#.to(self.device).eval()
         self.config.input_shape = (self.model.config.image_size, self.model.config.image_size)
@@ -142,8 +124,8 @@ class CLIPVisionModel():
         self.model = VisionEncoder(self.model)
         self.model.to(dtype=self.dtype, device=self.device).eval()
         
-        logging.debug(type(self.model), model, self.model)
-        logging.debug(f'{self.config.name} warmup')
+        logging.debug(f"{model_type} vision model {model}\n\n{self.model}")
+        logging.debug(f"{model_type} vision model warmup ({model})")
         
         self(PIL.Image.new('RGB', self.config.input_shape, (255,255,255)))
 
@@ -151,10 +133,12 @@ class CLIPVisionModel():
             try:
                 self.init_trt(**kwargs)
             except Exception as error:
-                logging.error(f"Exception occurred trying to use TensorRT for {self.model_type} model ({self.config.name})\n\n{traceback.format_exc()}")
+                logging.error(f"Exception occurred trying to use TensorRT for {model_type} model ({self.config.name})\n\n{traceback.format_exc()}")
 
-    def init_trt(self, trt_cache="~/.cache/clip_trt"): 
-        if Version(tensorrt.__version__) >= Version('8.6'):
+        logging.success(f"loaded {model_type} vision model {model}")
+        
+    def init_trt(self, trt_cache="~/.cache/clip_trt", **kwargs): 
+        if Version(tensorrt.__version__) < Version('8.6'):
             logging.warning(f"disabling CLIP with TensorRT {tensorrt.__version__} (requires TensorRT 8.6 or newer)")
             return
             
@@ -162,9 +146,9 @@ class CLIPVisionModel():
             logging.warning(f"disabling CLIP with TensorRT due to limited memory (falling back to Transformers API)")
             return
 
-        suffix = f"vision{'_projector' if self.projector else ''}"
-        trt_path = os.path.join(trt_cache, trt_model_filename(self.config.name, suffix=suffix))
-        test_model_inputs = torch.ones(1, 3, *self.config.input_shape, dtype=self.dtype, device='cuda')
+        suffix = f"vision{'_projector' if self.config.projector else ''}"
+        trt_path = os.path.join(os.path.expanduser(trt_cache), trt_model_filename(self.config.name, suffix=suffix))
+        test_inputs = torch.ones(1, 3, *self.config.input_shape, dtype=self.dtype, device='cuda')
 
         if os.path.isfile(trt_path):
             logging.info(f"loading TensorRT model from {trt_path}")
@@ -175,7 +159,7 @@ class CLIPVisionModel():
         
             trt_model = torch2trt.torch2trt(
                 self.model,
-                [test_model_inputs],
+                [test_inputs],
                 fp16_mode=True,#(self.config.dtype == torch.float16),
                 log_level=tensorrt.Logger.VERBOSE,
                 max_workspace_size=(1024**3) * 3,
@@ -195,13 +179,17 @@ class CLIPVisionModel():
             torch.cuda.synchronize()
             return (time.perf_counter() - time_begin) * 1000 / runs
             
-        logging.info(f"torch time: {profile_model(self.model, test_model_inputs)} ms")
-        logging.info(f"trt time:   {profile_model(trt_model, test_model_inputs)} ms")
+        key = 'image_embeds' if self.config.projector else 'pooler_output'
+        
+        logging.info(f"benchmarking {self.config.type} vision model {self.config.name}")
+        logging.info(f"torch time:  {profile_model(self.model, test_inputs)} ms")
+        logging.info(f"trt time:    {profile_model(trt_model, test_inputs)} ms")
+        logging.info(f"y^ delta:    {torch.max(torch.abs(self.model(test_inputs)[key] - trt_model(test_inputs)[key]))}")
           
         trt_model.config = self.model.config
         self.model = trt_model
         
-    def embed(self, image, hidden_state=None, return_tensors='pt', return_dict=False, stream=None, **kwargs):
+    def embed_image(self, image, hidden_state=None, return_tensors='pt', return_dict=False, stream=None, **kwargs):
         """
         Return the encoded features from the given image in the embedding (or whatever the model output is).
         """
@@ -230,12 +218,8 @@ class CLIPVisionModel():
                 
             image = self.preprocessor(image)
             model_output = self.model(image) #, output_hidden_states=hidden_state is not None)   #.pooler_output  .last_hidden_state
-
-            if self.model_type == 'clip':
-                output_embeds = model_output['image_embeds']
-            elif self.model_type == 'siglip':
-                output_embeds = model_output['pooler_output']
-                
+            output_embeds = model_output['image_embeds' if self.config.projector else 'pooler_output']
+  
             if hidden_state is not None:
                 hidden_tensor = _convert_tensor(model_output['hidden_states'][hidden_state])
                 if return_dict:
@@ -253,13 +237,13 @@ class CLIPVisionModel():
 
         time_end_enc = time.perf_counter()
         
-        self.stats.clip_time = time_end_enc - time_begin_enc
-        self.stats.clip_rate = 1.0 / self.stats.clip_time
-        self.stats.input_shape = f"{image_size(image)} -> {self.model.config.image_size}x{self.model.config.image_size}"
+        self.stats.time = time_end_enc - time_begin_enc
+        self.stats.rate = 1.0 / self.stats.time
+        self.stats.input_shape = f"{image_size(image)} -> {self.config.input_shape}"
         self.stats.output_shape = self.config.output_shape
 
         return output
         
-    def __call__(self, image, hidden_state=None, return_tensors='pt', **kwargs):
-        return self.embed(image, hidden_state=hidden_state, return_tensors='pt', **kwargs)
+    def __call__(self, image, **kwargs):
+        return self.embed_image(image, **kwargs)
         

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
-from .version import __version__
+from .text import CLIPTextModel
 from .vision import CLIPVisionModel
 from .clip import CLIPModel
+
+from .version import __version__
