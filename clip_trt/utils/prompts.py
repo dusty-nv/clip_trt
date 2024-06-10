@@ -4,6 +4,9 @@ import json
 import logging
 
 
+__all__ = ['load_prompts']
+
+
 def load_prompts(prompts, concat=False):
     """
     Load prompts from a list of txt or json files

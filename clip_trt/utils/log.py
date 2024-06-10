@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
+import sys
 import tqdm
 import numpy
 import logging
 import termcolor
 import contextlib
 
-
 # add custom logging.SUCCESS level and logging.success() function
 logging.SUCCESS = 35 # https://docs.python.org/3/library/logging.html#logging-levels
-
 
 class LogFormatter(logging.Formatter):
     """
@@ -87,7 +86,7 @@ class LogFormatter(logging.Formatter):
         Implementation of logging.Formatter record formatting function
         """
         return self.formatters[record.levelno].format(record)
-        
+
         
 # https://stackoverflow.com/a/37243211    
 class TQDMRedirectStdOut(object):
@@ -107,4 +106,6 @@ def tqdm_redirect_stdout():
     sys.stdout = save_stdout
     
     
+__all__ = ['LogFormatter', 'TQDMRedirectStdOut', 'tqdm_redirect_stdout']
+   
         

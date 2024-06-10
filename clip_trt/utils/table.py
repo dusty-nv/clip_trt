@@ -3,6 +3,9 @@ from tabulate import tabulate
 from termcolor import cprint, colored
 
 
+__all__ = ['print_table']
+
+
 def print_table(rows, header=None, footer=None, color='green', attrs=None):
     """
     Print a table from a list[list] of rows/columns, or a 2-column dict 

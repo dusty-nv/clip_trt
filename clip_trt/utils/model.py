@@ -6,6 +6,9 @@ import torch
 import tensorrt
 
 
+__all__ = ['clip_model_type', 'trt_model_filename']
+
+
 def clip_model_type(model, types=['clip', 'siglip']):
     """
     Determine if this is a CLIP or SigLIP model, either by checking for those

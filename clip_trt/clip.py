@@ -49,6 +49,16 @@ class CLIPModel():
  
         logging.debug(f"{self.model_name}  logit_scale={self.logit_scale}  logit_scale_exp={self.logit_scale_exp}  logit_bias={self.logit_bias}")
 
+    @property
+    def config(self):
+        """
+        This will access the vision model config.
+        """
+        if self.vision is not None:
+            return self.vision.config
+        else:
+            return self.text.config
+            
     def embed_image(self, image, **kwargs):
         """
         Return the encoded feature embedding for the given image(s).

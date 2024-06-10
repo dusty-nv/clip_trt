@@ -3,6 +3,12 @@ import torch
 import numpy as np
 
 
+__all__ = [
+    'cudaArrayInterface', 'torch_dtype_dict', 'torch_dtype', 
+    'convert_dtype', 'convert_tensor', 'is_embedding'
+]
+
+
 class cudaArrayInterface():
     """
     Exposes __cuda_array_interface__ - typically used as a temporary view into a larger buffer
@@ -24,8 +30,8 @@ class cudaArrayInterface():
             'typestr': typestr,
             'version': 3,
         }  
-        
 
+        
 torch_dtype_dict = {
     'bool'       : torch.bool,
     'uint8'      : torch.uint8,
@@ -39,6 +45,7 @@ torch_dtype_dict = {
     'complex64'  : torch.complex64,
     'complex128' : torch.complex128
 }
+
 
 def torch_dtype(dtype):
     """
@@ -71,7 +78,7 @@ def torch_dtype(dtype):
     
     raise ValueError("unknown dtype {dtype}  (type={type(dtype)}")
 
-    
+
 def convert_dtype(dtype, to='np'):
     """
     Convert a string, numpy type, or torch.dtype to either numpy or PyTorch
@@ -90,6 +97,7 @@ def convert_dtype(dtype, to='np'):
             return np.dtype(dtype)
             
     raise TypeError(f"expected dtype as a string, type, or torch.dtype (was {type(dtype)}) and with to='np' or to='pt' (was {to})")
+
     
 def convert_tensor(tensor, return_tensors='pt', device=None, dtype=None, **kwargs):
     """
@@ -124,6 +132,7 @@ def convert_tensor(tensor, return_tensors='pt', device=None, dtype=None, **kwarg
             return torch.as_tensor(tensor, dtype=dtype, device=device)
                     
     raise ValueError(f"unsupported tensor input/output type (in={type(tensor)} out={return_tensors})")
+
     
 def is_embedding(tensor):
     """
