@@ -63,7 +63,8 @@ class CLIPVisionModel():
         if crop is None:
             crop = (model_type == 'clip')
         elif isinstance(crop, str):
-            crop = (crop == 'crop')
+            crop = crop.lower()
+            crop = (crop == 'crop' or crop == 'true')
                 
         if model_type == 'siglip':
             if projector:
