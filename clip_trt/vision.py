@@ -18,13 +18,12 @@ from transformers import CLIPVisionModel as CLIPVisionModelHF, CLIPVisionModelWi
 from .utils import AttributeDict, load_image, torch_image, image_size, convert_tensor, clip_model_type, trt_model_filename
 
 
-_clip_vision_models = {}
-
-
 class CLIPVisionModel():
     """
     CLIP/SigLIP vision encoder for generating image embeddings with TensorRT.
     """
+    ModelCache = {}
+    
     @staticmethod
     def from_pretrained(model="openai/clip-vit-large-patch14-336", dtype=torch.float16, 
                         projector=None, crop=None, use_cache=True, use_tensorrt=True, **kwargs):
@@ -32,15 +31,13 @@ class CLIPVisionModel():
         Load a CLIP or SigLIP vision encoder model from HuggingFace Hub or a local checkpoint.
         Will use TensorRT for inference if ``use_tensorrt=True``, otherwise falls back to Transformers.
         """                
-        global _clip_vision_models
-        
-        if use_cache and model in _clip_vision_models:
-            return _clip_vision_models[model]
+        if use_cache and model in CLIPVisionModel.ModelCache:
+            return CLIPVisionModel.ModelCache[model]
             
         instance = CLIPVisionModel(model, dtype=dtype, projector=projector, crop=crop, use_tensorrt=use_tensorrt, **kwargs)
         
         if use_cache:
-            _clip_vision_models[model] = instance
+            CLIPVisionModel.ModelCache[model] = instance
             
         return instance
     
@@ -192,7 +189,7 @@ class CLIPVisionModel():
         
     def embed_image(self, image, hidden_state=None, return_tensors='pt', return_dict=False, stream=None, **kwargs):
         """
-        Return the encoded features from the given image in the embedding (or whatever the model output is).
+        Return the encoded feature embeddings from the given image (or whatever the model output is).
         """
         if isinstance(image, str):
             image = load_image(image)

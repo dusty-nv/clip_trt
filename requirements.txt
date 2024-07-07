@@ -2,6 +2,7 @@
 torch
 torchvision
 transformers>=4.37.0
+timm
 numpy
 pillow
 psutil

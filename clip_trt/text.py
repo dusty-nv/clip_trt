@@ -23,6 +23,8 @@ class CLIPTextModel():
     """
     CLIP/SigLIP text encoder and tokenizer for generating text embeddings with TensorRT.
     """
+    ModelCache = {}
+    
     @staticmethod
     def from_pretrained(model="openai/clip-vit-large-patch14-336", dtype=torch.float16, 
                         projector=None, use_cache=True, use_tensorrt=True, **kwargs):
@@ -30,15 +32,13 @@ class CLIPTextModel():
         Load a CLIP or SigLIP text encoder model from HuggingFace Hub or a local checkpoint.
         Will use TensorRT for inference if ``use_tensorrt=True``, otherwise falls back to Transformers.
         """                
-        global _clip_text_models
-        
-        if use_cache and model in _clip_text_models:
-            return _clip_text_models[model]
+        if use_cache and model in CLIPTextModel.ModelCache:
+            return CLIPTextModel.ModelCache[model]
             
         instance = CLIPTextModel(model, dtype=dtype, projector=projector, use_tensorrt=use_tensorrt, **kwargs)
         
         if use_cache:
-            _clip_text_models[model] = instance
+            CLIPTextModel.ModelCache[model] = instance
             
         return instance
     
