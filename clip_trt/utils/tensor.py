@@ -105,7 +105,17 @@ def convert_tensor(tensor, return_tensors='pt', device=None, dtype=None, **kwarg
     """
     if tensor is None:
         return None
-        
+    
+    if isinstance(return_tensors, type):
+        if return_tensors == np.ndarray:
+            return_tensors = 'np'
+        elif return_tensors == torch.Tensor:
+            return_tensors = 'pt'
+        elif return_tensors == list:
+            return_tensors = 'list'
+        else:
+            raise TypeError(f"expected return_tensors as np.ndarray, torch.Tensor, or list (was {return_tensors})")
+            
     dtype = convert_dtype(dtype, to=return_tensors)
     
     if isinstance(tensor, np.ndarray):
@@ -115,6 +125,8 @@ def convert_tensor(tensor, return_tensors='pt', device=None, dtype=None, **kwarg
             return tensor
         elif return_tensors == 'pt': # np->pt
             return torch.from_numpy(tensor).to(device=device, dtype=convert_dtype(dtype, to='pt'), **kwargs)
+        elif return_tensors == 'list': # np->list
+            return tensor.tolist()
     elif isinstance(tensor, torch.Tensor):
         if return_tensors == 'np':   # pt->np
             if dtype:
@@ -125,12 +137,16 @@ def convert_tensor(tensor, return_tensors='pt', device=None, dtype=None, **kwarg
                 return tensor.to(device=device, dtype=convert_dtype(dtype, to='pt'), **kwargs)
             else:
                 return tensor
+        elif return_tensors == 'list':
+            return tensor.tolist()
     elif isinstance(tensor, list):
         if return_tensors == 'np':
             return np.asarray(tensor, dtype=dtype)
         elif return_tensors == 'pt':
             return torch.as_tensor(tensor, dtype=dtype, device=device)
-                    
+        elif return_tensors == 'list':
+            return tensors
+                       
     raise ValueError(f"unsupported tensor input/output type (in={type(tensor)} out={return_tensors})")
 
     
