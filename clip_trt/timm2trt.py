@@ -3,6 +3,7 @@ import PIL
 import json
 import time
 import psutil
+import pprint
 import logging
 import functools
 import safetensors
@@ -135,70 +136,77 @@ def timm2trt(model="vit_large_patch14_reg4_dinov2.lvd142m",
             
     logging.info(f"loading TIMM vision model '{model}' (use_tensorrt={use_tensorrt}, {dtype})")
 
+    trt_suffix = []
+    
+    if hidden_state is not None:
+        trt_suffix.append(f"hidden{hidden_state}")
+     
+    img_size = kwargs.get('img_size')
+    
+    if img_size is not None:
+        trt_suffix.append(f"{img_size}px")
+    
+    timm_config = timm.get_pretrained_cfg(model)
+    logging.info(f"TIMM model '{model}' configuration:\n\n{pprint.pformat(timm_config, indent=2)}")
+     
+    trt_path = os.path.join(os.path.expanduser(trt_cache), trt_model_filename(model, suffix='_'.join(trt_suffix)))
+    trt_found = os.path.isfile(trt_path)
+
     timm_model = timm.create_model(
         model,
         pretrained=bool(not weights),
         exportable=use_tensorrt,
         **kwargs,
-    )
+    ) if not use_tensorrt or not trt_found else None
 
-    #logging.debug(timm_model)
-    
-    if weights:
-        with open(os.path.join(weights, 'model.safetensors.index.json')) as file:
-            weight_map = json.load(file)['weight_map']
+    if timm_model:
+        if weights:
+            with open(os.path.join(weights, 'model.safetensors.index.json')) as file:
+                weight_map = json.load(file)['weight_map']
+                
+            weight_files = {}
+            weight_tensors = {}
             
-        weight_files = {}
-        weight_tensors = {}
-        
-        for layer_name, weight_file in weight_map.items():
-            weight_files[weight_file] = weight_files.get(weight_file, []) + [layer_name]
-        
-        for weight_file, layers in weight_files.items():
-            weight_path = os.path.join(weights, weight_file)
-            logging.info(f"TIMM model '{model}' loading {weight_path}")   
-                  
-            with safetensors.safe_open(weight_path, framework='pt', device='cpu') as file:
-                for layer_name in layers:
-                    if weights_key:
-                        renamed_layer = weights_key(layer_name)
-                    else:
-                        renamed_layer = layer_name
+            for layer_name, weight_file in weight_map.items():
+                weight_files[weight_file] = weight_files.get(weight_file, []) + [layer_name]
+            
+            for weight_file, layers in weight_files.items():
+                weight_path = os.path.join(weights, weight_file)
+                logging.info(f"TIMM model '{model}' loading {weight_path}")   
+                      
+                with safetensors.safe_open(weight_path, framework='pt', device='cpu') as file:
+                    for layer_name in layers:
+                        if weights_key:
+                            renamed_layer = weights_key(layer_name)
+                        else:
+                            renamed_layer = layer_name
+                            
+                        if not renamed_layer:
+                            continue
                         
-                    if not renamed_layer:
-                        continue
-                    
-                    logging.debug(f"loading {model} layer weights {layer_name} as {renamed_layer}")  
-                    weight_tensors[renamed_layer] = file.get_tensor(layer_name)
+                        logging.debug(f"loading {model} layer weights {layer_name} as {renamed_layer}")  
+                        weight_tensors[renamed_layer] = file.get_tensor(layer_name)
 
-        timm_model.load_state_dict(weight_tensors)     
-    
-    trt_suffix = []
-    
-    def unpack_tuple(fn):
-        def wrapper(*args, **kwargs):
-            result = fn(*args, **kwargs)
-            return result[0] if isinstance(result, (tuple,list)) else result
-        return wrapper
+            timm_model.load_state_dict(weight_tensors)     
 
-    if hidden_state is not None:
-        if hidden_state < 0:
-            hidden_state = len(timm_model.blocks) + hidden_state
-        timm_model.forward = unpack_tuple(
-            functools.partial(timm_model.get_intermediate_layers, n={hidden_state})
-        )
-        logging.debug(f"TIMM model '{model}' output hidden state {hidden_state}")
-        trt_suffix.append(f"hidden{hidden_state}")
+        def unpack_tuple(fn):
+            def wrapper(*args, **kwargs):
+                result = fn(*args, **kwargs)
+                return result[0] if isinstance(result, (tuple,list)) else result
+            return wrapper
+
+        if hidden_state is not None:
+            if hidden_state < 0:
+                hidden_state = len(timm_model.blocks) + hidden_state
+            timm_model.forward = unpack_tuple(
+                functools.partial(timm_model.get_intermediate_layers, n={hidden_state})
+            )
+            logging.debug(f"TIMM model '{model}' output hidden state {hidden_state}")
         
-    timm_model = timm_model.to(dtype=dtype, device=device).eval()
+        timm_model = timm_model.to(dtype=dtype, device=device).eval()
 
-    # get model specific transforms (normalization, resize)
-    img_size = kwargs.get('img_size')
-    
-    if img_size is not None:
-        trt_suffix.append(f"{img_size}px")
-        
-    data_config = timm.data.resolve_model_data_config(timm_model, args={'img_size': img_size})
+    # get model specific transforms (normalization, resize)   
+    data_config = timm.data.resolve_model_data_config(timm_model, args={'img_size': img_size}, pretrained_cfg=timm_config.to_dict())
     transforms = timm.data.create_transform(**data_config, is_training=False)
     logging.debug(f"TIMM model '{model}' preprocessing transforms:\n{data_config}\n{transforms}")
 
@@ -214,18 +222,18 @@ def timm2trt(model="vit_large_patch14_reg4_dinov2.lvd142m",
     input = torch_image(PIL.Image.new('RGB', (512,512), (255,255,255)), dtype=dtype, device=device)
     input = transforms(input).unsqueeze(0)
     
-    output = timm_model(input)
-
-    logging.debug(f"TIMM model '{model}' inputs:  shape={input.shape}  dtype={input.dtype}  device={input.device}")
-    logging.debug(f"TIMM model '{model}' output:  shape={output.shape}  dtype={output.dtype}  device={output.device}")
-    
+    if timm_model:
+        output = timm_model(input)
+        logging.debug(f"TIMM model '{model}' inputs:  shape={input.shape}  dtype={input.dtype}  device={input.device}")
+        logging.debug(f"TIMM model '{model}' output:  shape={output.shape}  dtype={output.dtype}  device={output.device}")
+        
     # load TensorRT model (or build it first)
     if not use_tensorrt:
         return timm_model, transforms
         
     trt_path = os.path.join(os.path.expanduser(trt_cache), trt_model_filename(model, suffix='_'.join(trt_suffix)))
 
-    if os.path.isfile(trt_path):
+    if trt_found:
         logging.info(f"loading TensorRT engine for TIMM model '{model}' from {trt_path}")
         trt_model = torch2trt.TRTModule()
         trt_model.load_state_dict(torch.load(trt_path))
@@ -256,20 +264,20 @@ def timm2trt(model="vit_large_patch14_reg4_dinov2.lvd142m",
         return (time.perf_counter() - time_begin) * 1000 / runs
         
     logging.info(f"benchmarking TIMM vision model {model}")
-    logging.info(f"torch_time:  {profile_model(timm_model, input, runs=benchmark_runs)} ms")
     logging.info(f"trt_time:    {profile_model(trt_model, input, runs=benchmark_runs)} ms")
-    logging.info(f"y^ RMSE:     {torch.sqrt(torch.mean(torch.pow(torch.abs(trt_model(input) - timm_model(input)),2.0)))}")   #{torch.max(torch.abs(timm_model(input) - trt_model(input)))}")
     
-    trt_model.embed_dim = timm_model.embed_dim
-    
-    del timm_model
+    if timm_model:
+        logging.info(f"torch_time:  {profile_model(timm_model, input, runs=benchmark_runs)} ms")
+        logging.info(f"y^ RMSE:     {torch.sqrt(torch.mean(torch.pow(torch.abs(trt_model(input) - timm_model(input)),2.0)))}")   #{torch.max(torch.abs(timm_model(input) - trt_model(input)))}")
+        #trt_model.embed_dim = timm_model.embed_dim
+        del timm_model
+        
     return trt_model, transforms
 
 
 if __name__ == '__main__':
     import sys
     import urllib
-    import pprint
     import argparse
     
     from clip_trt.utils import LogFormatter, print_table
@@ -337,7 +345,7 @@ if __name__ == '__main__':
         print("")
         print(f"inputs:  shape={input.shape}  dtype={input.dtype}  device={input.device}")
         print(f"output:  shape={output.shape}  dtype={output.dtype}  device={output.device}")
-        print(f"embeds:  {model.embed_dim}")
+        #print(f"embeds:  {model.embed_dim}")
     
     # classify
     #top5_probabilities, top5_class_indices = torch.topk(output.softmax(dim=1) * 100, k=5)
