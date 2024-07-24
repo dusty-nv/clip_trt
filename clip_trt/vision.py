@@ -133,7 +133,7 @@ class CLIPVisionModel():
             except Exception as error:
                 logging.error(f"Exception occurred trying to use TensorRT for {model_type} model ({self.config.name})\n\n{traceback.format_exc()}")
 
-        logging.success(f"loaded {model_type} vision model {model}")
+        logging.info(f"loaded {model_type} vision model {model}")
         
     def init_trt(self, trt_cache="~/.cache/clip_trt", **kwargs): 
         if Version(tensorrt.__version__) < Version('8.6'):

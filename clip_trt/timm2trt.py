@@ -69,7 +69,7 @@ class TIMMVisionModel():
         
         self(PIL.Image.new('RGB', self.config.input_shape, (255,255,255)))
         
-        logging.success(f"loaded TIMM vision model {model}  (use_tensorrt={isinstance(self.model, torch2trt.TRTModule)})")
+        logging.info(f"loaded TIMM vision model {model}  (use_tensorrt={isinstance(self.model, torch2trt.TRTModule)})")
         
     def embed_image(self, image, return_tensors='pt', stream=None, **kwargs):
         """
