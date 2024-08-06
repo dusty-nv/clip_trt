@@ -117,7 +117,7 @@ class TIMMVisionModel():
 def timm2trt(model="vit_large_patch14_reg4_dinov2.lvd142m", 
              weights=None, weights_key=None, 
              dtype=torch.float16, device='cuda:0', 
-             hidden_state=None, benchmark_runs=25, 
+             transform={}, hidden_state=None, benchmark_runs=25, 
              use_tensorrt=True, trt_cache="~/.cache/clip_trt", 
              **kwargs):
     """
@@ -141,11 +141,12 @@ def timm2trt(model="vit_large_patch14_reg4_dinov2.lvd142m",
     if hidden_state is not None:
         trt_suffix.append(f"hidden{hidden_state}")
      
-    img_size = kwargs.get('img_size')
-    
-    if img_size is not None:
-        trt_suffix.append(f"{img_size}px")
-    
+    if 'img_size' in kwargs:
+        transform['img_size'] = kwargs['img_size']
+        
+    for key, value in transform.items():
+        trt_suffix.append(f"{key}={value}")
+ 
     timm_config = timm.get_pretrained_cfg(model)
     logging.info(f"TIMM model '{model}' configuration:\n\n{pprint.pformat(timm_config, indent=2)}")
      
@@ -184,7 +185,7 @@ def timm2trt(model="vit_large_patch14_reg4_dinov2.lvd142m",
                         if not renamed_layer:
                             continue
                         
-                        logging.debug(f"loading {model} layer weights {layer_name} as {renamed_layer}")  
+                        #logging.debug(f"loading {model} layer weights {layer_name} as {renamed_layer}")  
                         weight_tensors[renamed_layer] = file.get_tensor(layer_name)
 
             timm_model.load_state_dict(weight_tensors)     
@@ -206,7 +207,7 @@ def timm2trt(model="vit_large_patch14_reg4_dinov2.lvd142m",
         timm_model = timm_model.to(dtype=dtype, device=device).eval()
 
     # get model specific transforms (normalization, resize)   
-    data_config = timm.data.resolve_model_data_config(timm_model, args={'img_size': img_size}, pretrained_cfg=timm_config.to_dict())
+    data_config = timm.data.resolve_model_data_config(timm_model, args=transform, pretrained_cfg=timm_config.to_dict())
     transforms = timm.data.create_transform(**data_config, is_training=False)
     logging.debug(f"TIMM model '{model}' preprocessing transforms:\n{data_config}\n{transforms}")
 
