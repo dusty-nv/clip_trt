@@ -140,17 +140,24 @@ def timm2trt(model="vit_large_patch14_reg4_dinov2.lvd142m",
     
     if hidden_state is not None:
         trt_suffix.append(f"hidden{hidden_state}")
-     
+ 
     if 'img_size' in kwargs:
         transform['img_size'] = kwargs['img_size']
         
     for key, value in transform.items():
         trt_suffix.append(f"{key}={value}")
  
+    if weights:
+        weight_dir = weights.split('/')
+        weight_dir = '-'.join(weight_dir[-min(len(weight_dir), 2):])
+        model_name = weight_dir + '-' + model
+    else:
+        model_name = model
+        
     timm_config = timm.get_pretrained_cfg(model)
-    logging.info(f"TIMM model '{model}' configuration:\n\n{pprint.pformat(timm_config, indent=2)}")
+    logging.info(f"TIMM model '{model_name}' configuration:\n\n{pprint.pformat(timm_config, indent=2)}")
      
-    trt_path = os.path.join(os.path.expanduser(trt_cache), trt_model_filename(model, suffix='_'.join(trt_suffix)))
+    trt_path = os.path.join(os.path.expanduser(trt_cache), trt_model_filename(model_name, suffix='-'.join(trt_suffix)))
     trt_found = os.path.isfile(trt_path)
 
     timm_model = timm.create_model(
@@ -231,8 +238,6 @@ def timm2trt(model="vit_large_patch14_reg4_dinov2.lvd142m",
     # load TensorRT model (or build it first)
     if not use_tensorrt:
         return timm_model, transforms
-        
-    trt_path = os.path.join(os.path.expanduser(trt_cache), trt_model_filename(model, suffix='_'.join(trt_suffix)))
 
     if trt_found:
         logging.info(f"loading TensorRT engine for TIMM model '{model}' from {trt_path}")
