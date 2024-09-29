@@ -145,7 +145,7 @@ def convert_tensor(tensor, return_tensors='pt', device=None, dtype=None, **kwarg
         elif return_tensors == 'pt':
             return torch.as_tensor(tensor, dtype=dtype, device=device)
         elif return_tensors == 'list':
-            return tensors
+            return tensor
                        
     raise ValueError(f"unsupported tensor input/output type (in={type(tensor)} out={return_tensors})")
 
