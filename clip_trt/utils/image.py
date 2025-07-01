@@ -2,6 +2,7 @@
 import io
 import PIL
 import logging
+import requests
 import torch
 import torchvision.transforms.functional as F
 
